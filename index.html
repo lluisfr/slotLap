@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>SlotLap ESP32-C3</title>
+<style>
+:root{box-sizing:border-box;--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#fff;--mut:#94a3b8;--green:#22c55e;--blue:#38bdf8;--inp:#0b1326;
+padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:Roboto,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;margin:4px 0 14px}
+h1{font-size:24px;margin:0;font-weight:700}
+#badge{border:0;border-radius:999px;padding:7px 14px;font-weight:700;font-size:16px;background:#3b1d24;color:#f87171;font-family:inherit}
+#badge.on{background:#14532d;color:#4ade80}
+#tabs{display:flex;gap:8px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:999px;padding:9px 16px;font-size:16px;font-weight:700;font-family:inherit;white-space:nowrap;cursor:pointer}
+.tab.act{background:var(--blue);color:#082f49;border-color:var(--blue)}
+.tab.off{opacity:.55}
+.tab.add{color:var(--blue)}
+#lane{display:none;width:100%;background:var(--inp);color:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:18px;font-family:inherit;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:18px;margin-bottom:18px}
+.lbl{color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-size:15px}
+.row{display:flex;justify-content:space-between;gap:12px}
+.row>div{flex:1}
+.big{font-size:44px;font-weight:700;margin:22px 0 18px;font-variant-numeric:tabular-nums;letter-spacing:.04em;min-height:54px}
+.big.best{color:var(--green)}
+.bar{height:30px;border-radius:15px;background:var(--bg);margin:14px 0 18px;overflow:hidden}
+#fill{height:100%;width:1%;background:var(--blue);border-radius:15px;transition:width .1s}
+.btns{display:flex;justify-content:space-between;gap:12px}
+button.b{border:0;border-radius:14px;padding:18px 24px;font-size:20px;font-weight:700;font-family:inherit;cursor:pointer}
+#voice{background:var(--green);color:#052e16}
+#voice.off{background:#334155;color:#fff}
+#reset{background:#334155;color:#fff}
+.field{display:flex;justify-content:space-between;align-items:center;margin:14px 0}
+.field span{font-size:24px}
+input.n{width:48%;background:var(--inp);color:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;font-size:24px;font-family:inherit}
+#save{background:var(--blue);color:#082f49;float:right;margin-top:6px}
+.clr{clear:both}
+#hist{margin-top:10px;max-height:50vh;overflow-y:auto}
+.h{display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:20px;font-variant-numeric:tabular-nums}
+.h.best{color:var(--green);font-weight:700}
+</style>
+</head>
+<body>
+<header><h1>SlotLap ESP32-C3</h1><button id="badge">Sense aparell</button></header>
+<div id="tabs"></div>
+<input id="lane" type="text" maxlength="12" placeholder="Nom del carril (es desa a l’aparell)">
+
+<div class="card">
+  <div class="row">
+    <div><div class="lbl" id="lastLbl">Última volta (0)</div><div class="big" id="last">--.---</div></div>
+    <div><div class="lbl">Millor volta</div><div class="big best" id="best">--.---</div></div>
+  </div>
+  <div class="row">
+    <div class="lbl" id="state">Estat: esperant recta</div>
+    <div class="lbl" id="sig">Senyal: 0.00 V (màx 0.00 V)</div>
+  </div>
+  <div class="bar"><div id="fill"></div></div>
+  <div class="btns">
+    <button class="b" id="voice">Veu activada</button>
+    <button class="b" id="reset">Nova tanda</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="lbl">Calibratge de pista (desat a memòria)</div>
+  <div class="field"><span>Temps recta (ms):</span><input class="n" id="pr" type="number" inputmode="numeric" value="800"></div>
+  <div class="field"><span>Temps bloqueig (ms):</span><input class="n" id="pb" type="number" inputmode="numeric" value="7500"></div>
+  <button class="b" id="save">Desar paràmetres</button><div class="clr"></div>
+</div>
+
+<div class="card">
+  <div class="lbl">Historial de voltes</div>
+  <div id="hist"></div>
+</div>
+
+<script>
+const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e',RXC='6e400002-b5a3-f393-e0a9-e50e24dcca9e',TXC='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const $=id=>document.getElementById(id);
+const STATES=['esperant recta','recta armada','bloqueig post-meta'];
+const enc=new TextEncoder(),dec=new TextDecoder();
+const fmt=ms=>(ms/1000).toFixed(3);
+let devs=[],act=null,voice=true;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+
+async function send(d,t){if(!d||!d.rx)return;try{await d.rx.writeValue(enc.encode(t+'\n'))}catch(e){console.error(e)}}
+
+async function addDevice(){
+  if(!navigator.bluetooth){alert('Aquest navegador no suporta Web Bluetooth. Fes servir Chrome a Android.');return}
+  try{
+    const dev=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]});
+    let d=devs.find(x=>x.dev.id===dev.id);
+    if(!d){
+      d={dev,rx:null,buf:'',laps:[],v:0,vmax:0,st:0,pr:800,pb:7500,conn:false,label:lsGet('lbl:'+dev.id)||('Carril '+(devs.length+1))};
+      dev.addEventListener('gattserverdisconnected',()=>{d.conn=false;d.rx=null;tabs();head()});
+      devs.push(d);
+    }
+    act=d;show();await link(d);
+  }catch(e){console.error(e)}
+}
+
+async function link(d){
+  try{
+    const s=await (await d.dev.gatt.connect()).getPrimaryService(SVC);
+    d.rx=await s.getCharacteristic(RXC);
+    const t=await s.getCharacteristic(TXC);
+    await t.startNotifications();
+    t.addEventListener('characteristicvaluechanged',e=>{
+      d.buf+=dec.decode(e.target.value);
+      let i;while((i=d.buf.indexOf('\n'))>=0){line(d,d.buf.slice(0,i).trim());d.buf=d.buf.slice(i+1)}
+    });
+    d.conn=true;send(d,'GET');
+  }catch(e){console.error(e);d.conn=false}
+  tabs();head();
+}
+
+function line(d,l){
+  const p=l.split(',');
+  if(p[0]==='S'){d.v=parseFloat(p[1]);d.vmax=parseFloat(p[2]);d.st=+p[3];if(d===act)live()}
+  else if(p[0]==='P'){d.pr=+p[1];d.pb=+p[2];if(d===act){$('pr').value=d.pr;$('pb').value=d.pb}}
+  else if(p[0]==='L'){
+    d.laps.push(+p[2]);
+    if(d===act)laps();
+    if(voice&&'speechSynthesis' in window){
+      const isBest=+p[2]<=Math.min(...d.laps)&&d.laps.length>1;
+      const s=(+p[2]/1000).toFixed(2).replace('.',' amb ');
+      const pre=devs.length>1?d.label+'. ':'';
+      speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(pre+(isBest?'Millor volta! '+s:s));u.lang='ca-ES';u.rate=1.08;speechSynthesis.speak(u);
+    }
+  }else if(p[0]==='R'){d.laps=[];if(d===act)laps()}
+  else if(p[0]==='N'){d.name=p.slice(1).join(',');if(!lsGet('lbl:'+d.dev.id))d.label=d.name||d.label;if(d===act)show();tabs()}
+}
+
+function tabs(){
+  const t=$('tabs');t.innerHTML='';
+  devs.forEach(d=>{
+    const b=document.createElement('button');
+    b.className='tab'+(d===act?' act':'')+(d.conn?'':' off');
+    b.textContent=d.label;
+    b.onclick=()=>{act=d;show();tabs();head()};
+    t.appendChild(b);
+  });
+  const a=document.createElement('button');
+  a.className='tab add';a.textContent='+ Afegir aparell';a.onclick=addDevice;t.appendChild(a);
+}
+function head(){
+  const b=$('badge');
+  if(!act){b.textContent='Sense aparell';b.classList.remove('on');return}
+  b.textContent=act.conn?'Connectat':'Desconnectat';b.classList.toggle('on',act.conn);
+}
+function live(){
+  const d=act;if(!d)return;
+  $('sig').textContent='Senyal: '+d.v.toFixed(2)+' V (màx '+d.vmax.toFixed(2)+' V)';
+  $('state').textContent='Estat: '+(STATES[d.st]||'--');
+  $('fill').style.width=Math.max(1,d.vmax>0?Math.min(100,d.v/d.vmax*100):1)+'%';
+}
+function laps(){
+  const L=act?act.laps:[],n=L.length;
+  $('lastLbl').textContent='Última volta ('+n+')';
+  $('last').textContent=n?fmt(L[n-1]):'--.---';
+  const best=n?Math.min(...L):0;
+  $('best').textContent=n?fmt(best):'--.---';
+  $('hist').innerHTML=L.map((t,i)=>'<div class="h'+(t===best?' best':'')+'"><span>Volta '+(i+1)+'</span><span>'+fmt(t)+' s</span></div>').reverse().join('');
+}
+function show(){
+  const ln=$('lane');ln.style.display=act?'block':'none';
+  if(act){ln.value=act.label;ln.placeholder=act.dev.name||'Nom del carril';$('pr').value=act.pr;$('pb').value=act.pb}
+  live();laps();
+}
+
+$('lane').oninput=e=>{if(!act)return;act.label=e.target.value||'Carril';lsSet('lbl:'+act.dev.id,act.label);tabs()};
+function reconn(d,n){setTimeout(async()=>{await link(d);if(!d.conn&&n>0)reconn(d,n-1)},3000)}
+$('lane').onchange=e=>{
+  if(!act||!act.conn)return;
+  const d=act,n=e.target.value.trim().slice(0,12);
+  send(d,'NAME,'+n);reconn(d,4);
+};
+$('badge').onclick=()=>{
+  if(!act)return addDevice();
+  if(act.conn)act.dev.gatt.disconnect();else link(act);
+};
+$('reset').onclick=()=>{if(!act)return;send(act,'RESET');act.laps=[];laps()};
+$('save').onclick=()=>{if(act)send(act,'SET,'+(+$('pr').value||0)+','+(+$('pb').value||0))};
+$('voice').onclick=()=>{voice=!voice;$('voice').textContent=voice?'Veu activada':'Veu desactivada';$('voice').classList.toggle('off',!voice)};
+tabs();head();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
