@@ -72,6 +72,7 @@ input.n{width:48%;background:var(--inp);color:#fff;border:1px solid var(--line);
   <div class="lbl">Calibratge de pista (desat a memòria)</div>
   <div class="field"><span>Temps recta (ms):</span><input class="n" id="pr" type="number" inputmode="numeric" value="800"></div>
   <div class="field"><span>Temps bloqueig (ms):</span><input class="n" id="pb" type="number" inputmode="numeric" value="7500"></div>
+  <div class="field"><span>Llindar frenada (%):</span><input class="n" id="pf" type="number" inputmode="numeric" value="85"></div>
   <button class="b" id="save">Desar paràmetres</button><div class="clr"></div>
 </div>
 
@@ -98,7 +99,7 @@ async function addDevice(){
     const dev=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]});
     let d=devs.find(x=>x.dev.id===dev.id);
     if(!d){
-      d={dev,rx:null,buf:'',laps:[],v:0,vmax:0,st:0,pr:800,pb:7500,conn:false,label:lsGet('lbl:'+dev.id)||('Carril '+(devs.length+1))};
+      d={dev,rx:null,buf:'',laps:[],v:0,vmax:0,st:0,pr:800,pb:7500,pf:85,conn:false,label:lsGet('lbl:'+dev.id)||('Carril '+(devs.length+1))};
       dev.addEventListener('gattserverdisconnected',()=>{d.conn=false;d.rx=null;tabs();head()});
       devs.push(d);
     }
@@ -124,7 +125,7 @@ async function link(d){
 function line(d,l){
   const p=l.split(',');
   if(p[0]==='S'){d.v=parseFloat(p[1]);d.vmax=parseFloat(p[2]);d.st=+p[3];if(d===act)live()}
-  else if(p[0]==='P'){d.pr=+p[1];d.pb=+p[2];if(d===act){$('pr').value=d.pr;$('pb').value=d.pb}}
+  else if(p[0]==='P'){d.pr=+p[1];d.pb=+p[2];if(p[3])d.pf=+p[3];if(d===act){$('pr').value=d.pr;$('pb').value=d.pb;$('pf').value=d.pf}}
   else if(p[0]==='L'){
     d.laps.push(+p[2]);
     if(d===act)laps();
@@ -172,7 +173,7 @@ function laps(){
 }
 function show(){
   const ln=$('lane');ln.style.display=act?'block':'none';
-  if(act){ln.value=act.label;ln.placeholder=act.dev.name||'Nom del carril';$('pr').value=act.pr;$('pb').value=act.pb}
+  if(act){ln.value=act.label;ln.placeholder=act.dev.name||'Nom del carril';$('pr').value=act.pr;$('pb').value=act.pb;$('pf').value=act.pf}
   live();laps();
 }
 
@@ -188,7 +189,7 @@ $('badge').onclick=()=>{
   if(act.conn)act.dev.gatt.disconnect();else link(act);
 };
 $('reset').onclick=()=>{if(!act)return;send(act,'RESET');act.laps=[];laps()};
-$('save').onclick=()=>{if(act)send(act,'SET,'+(+$('pr').value||0)+','+(+$('pb').value||0))};
+$('save').onclick=()=>{if(act)send(act,'SET,'+(+$('pr').value||0)+','+(+$('pb').value||0)+','+(+$('pf').value||85))};
 $('voice').onclick=()=>{voice=!voice;$('voice').textContent=voice?'Veu activada':'Veu desactivada';$('voice').classList.toggle('off',!voice)};
 tabs();head();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});

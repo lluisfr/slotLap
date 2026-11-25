@@ -1,4 +1,4 @@
-const CACHE = 'slotlap-v2';  // canvia el número si actualitzes la pàgina
+const CACHE = 'slotlap-v3';  // canvia el número si actualitzes la pàgina
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
